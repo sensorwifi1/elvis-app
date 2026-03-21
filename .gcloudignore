@@ -2,7 +2,5 @@
 .gitignore
 node_modules/
 __pycache__/
-*.pyc
 *.log
 serviceAccountKey.json
-static/images/temp_*
