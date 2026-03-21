@@ -27,7 +27,19 @@ async def get_joke(item: str = "jedzenie"):
         res = requests.post(GEMINI_URL, json=payload, timeout=5).json()
         return {"joke": res['candidates'][0]['content']['parts'][0]['text'].strip()}
     except: return {"joke": "Smacznego! Ten burger to legenda."}
-
+@app.get("/api/get_story")
+async def get_story(item: str = "burger"):
+    prompt = f"Jesteś historykiem kulinarnym. Napisz jedną, fascynującą anegdotę o: {item}. Max 300 znaków. Zakończ kropką."
+    try:
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 100, "temperature": 0.8}
+        }
+        res = requests.post(GEMINI_URL, json=payload, timeout=5).json()
+        story = res['candidates'][0]['content']['parts'][0]['text'].strip()
+        return {"story": story}
+    except:
+        return {"story": "Czy wiesz, że pierwszy burger powstał z potrzeby zjedzenia posiłku w biegu? To klasyka, która nigdy nie wyjdzie z mody."}
 @app.get("/api/get_menu")
 async def get_menu(): 
     menu_dict = {d.id: d.to_dict() for d in db.collection("menu").stream()}

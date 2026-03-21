@@ -109,6 +109,10 @@
     <div id="productModal" class="modal-overlay">
         <div class="modal-content">
             <button class="close-btn" onclick="closeModal()">X</button>
+            <div id="modalStory" style="font-size: 0.85em; color: var(--gold); font-style: italic; margin-bottom: 15px; line-height: 1.4; border-left: 2px solid var(--gold); padding-left: 10px;">
+                Ładowanie ciekawostki...
+            </div>
+            <img id="modalImg" class="modal-img" src="" alt="">
             <img id="modalImg" class="modal-img" src="" alt="">
             <h2 id="modalTitle" class="modal-title"></h2>
             <p id="modalPrice" class="modal-price"></p>
@@ -148,9 +152,22 @@
             document.getElementById('menu-grid').innerHTML = html;
         }
 
-        function openModal(key) {
-            const v = serverMenu[key]; currentProduct = { key: key, ...v }; currentQty = 1;
+        async function openModal(key) {
+            const v = serverMenu[key];
+            currentProduct = { key: key, ...v };
+            currentQty = 1;
+
+            // Czyścimy starą anegdotę i pobieramy nową
+            document.getElementById('modalStory').innerText = "Duch burgera szuka faktów...";
+            fetch(`/api/get_story?item=${encodeURIComponent(v.name)}`)
+                .then(res => res.json())
+                .then(data => {
+                    document.getElementById('modalStory').innerText = data.story;
+                });
+
             document.getElementById('modalImg').src = `/static/images/${v.image}`;
+            // ... reszta Twojego kodu openModal ...
+
             document.getElementById('modalTitle').innerText = v.name;
             document.getElementById('modalPrice').innerText = `${v.price} zł`;
             document.getElementById('modalDesc').innerText = v.description || "";
