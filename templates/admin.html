@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>POS Master Admin</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --gold: #d4af37; --bg: #000; }
+        body { background: var(--bg); color: #fff; font-family: sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden;}
+        nav { width: 220px; background: #111; height: 100vh; padding: 20px; border-right: 1px solid #333; }
+        main { flex: 1; display: flex; flex-direction: column; overflow: hidden;}
+        .tab { display: none; flex: 1; overflow: hidden; } .tab.active { display: flex; flex-direction: column;}
+        .nav-btn { display: block; width: 100%; padding: 12px; background: none; border: none; color: #888; text-align: left; cursor: pointer; font-size: 1.1em;}
+        .nav-btn.active { color: var(--gold); font-weight: bold; background: #222; border-radius: 5px;}
+        
+        .top-stats { display: flex; gap: 20px; padding: 15px; background: #0a0a0a; border-bottom: 1px solid #222; align-items: center;}
+        .stat-item { background: #111; padding: 10px 20px; border-radius: 8px; border: 1px solid #333; display: flex; align-items: center; gap: 15px; min-width: 200px;}
+        .stat-item h3 { margin: 0; font-size: 0.9em; color: #888; }
+        .stat-item h2 { margin: 0; font-size: 1.5em; color: var(--gold); }
+        .chart-container { flex: 1; max-width: 500px; height: 80px; }
+
+        .workspace { display: flex; flex: 1; overflow: hidden; }
+        .floor-area { flex: 1; padding: 20px; overflow: auto; position: relative; display: flex; flex-direction: column;}
+        .sidebar { width: 350px; background: #111; border-left: 1px solid #333; display: flex; flex-direction: column; }
+        
+        /* LEGENDA ADMINA */
+        .legend { display: flex; gap: 15px; margin-bottom: 15px; padding: 10px; background: #111; border-radius: 8px; border: 1px solid #333; flex-wrap: wrap;}
+        .leg-item { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 0.85em; color: #ccc;}
+        .leg-box { width: 15px; height: 15px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2);}
+        
+        .floor-plan { background: #1a1a1a; position: relative; border: 2px dashed #444; flex: 1;}
+        .table-rect { position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-weight: bold; font-size: 1.2em; border: 2px solid rgba(0,0,0,0.5); cursor: pointer; color: #fff;}
+        
+        /* KOLORY STOLIKÓW */
+        .t-free { background: #388e3c; } 
+        .t-open { background: #fbc02d; color: #000; } 
+        .t-issued { background: #d32f2f; } 
+        .t-paid { background: #03a9f4; }
+        
+        .table-rect.call { animation: pulseCall 1s infinite alternate; border-color:#fff;}
+        .table-rect.pay { animation: pulsePay 1s infinite alternate; border-color:#fff;}
+        @keyframes pulseCall { from { transform: scale(1); box-shadow: 0 0 10px #2196f3; } to { transform: scale(1.05); box-shadow: 0 0 20px #2196f3; } }
+        @keyframes pulsePay { from { transform: scale(1); box-shadow: 0 0 10px #9c27b0; } to { transform: scale(1.05); box-shadow: 0 0 20px #9c27b0; } }
+
+        .prod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; padding: 20px; overflow-y: auto;}
+        .prod-card { background: #151515; padding: 10px; border-radius: 8px; border: 1px solid #222; text-align: center; }
+        .prod-card img { width: 100%; height: 100px; object-fit: cover; border-radius: 5px; }
+        .input-group { margin-bottom: 10px; display: flex; gap: 10px; }
+        .input-group input[type="text"], .input-group input[type="number"] { padding: 8px; background: #333; border: 1px solid #555; color: white; border-radius: 4px; width: 100%; }
+        .order-item-read { background: #000; padding: 15px; border-bottom: 1px solid #333; border-left: 4px solid var(--gold);}
+    </style>
+</head>
+<body>
+    <nav>
+        <h2 style="color:var(--gold)">POS ADMIN</h2>
+        <button class="nav-btn active" onclick="showTab('tab-dash')">DASHBOARD & SALA</button>
+        <button class="nav-btn" onclick="showTab('tab-floor-edit')">EDYCJA SALI</button>
+        <button class="nav-btn" onclick="showTab('tab-menu')">PRODUKTY</button>
+    </nav>
+    <main>
+        <div id="tab-dash" class="tab active">
+            <div class="top-stats">
+                <div class="stat-item"><div><h3>Utarg Dzisiaj:</h3><h2 id="st-rev">0.00 zł</h2></div></div>
+                <div class="stat-item"><div><h3>Zamówienia:</h3><h2 id="st-qty">0</h2></div></div>
+                <div class="chart-container"><canvas id="mainChart"></canvas></div>
+            </div>
+            
+            <div class="workspace">
+                <div class="floor-area">
+                    <div class="legend">
+                        <div class="leg-item"><div class="leg-box t-free"></div> Wolny</div>
+                        <div class="leg-item"><div class="leg-box t-open"></div> W trakcie</div>
+                        <div class="leg-item"><div class="leg-box t-issued"></div> Wydane (Do zapłaty)</div>
+                        <div class="leg-item"><div class="leg-box t-paid"></div> Opłacone</div>
+                    </div>
+                    <div id="floor-dash" class="floor-plan"></div>
+                </div>
+                <div class="sidebar">
+                    <div style="padding: 20px; background: #1a1a1a; border-bottom: 1px solid #333;">
+                        <h2 id="admin-sb-title" style="margin:0; color:var(--gold);">Podgląd Stolika</h2>
+                    </div>
+                    <div id="admin-sb-orders" style="flex:1; overflow-y:auto;">
+                        <p style="color:#666; text-align:center; margin-top:50px;">Kliknij stolik na mapie, aby zobaczyć rachunek.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="tab-floor-edit" class="tab">
+            <div style="padding: 20px; background:#111; border-bottom:1px solid #333;">
+                <h3 style="color:var(--gold); margin-top:0;">Tryb Edycji Mapy Sali</h3>
+                Szer: <input type="number" id="f-w" value="10" onchange="drawFloorEdit()" style="width:50px; background:#333; color:white; border:none; padding:5px;"> 
+                Wys: <input type="number" id="f-h" value="8" onchange="drawFloorEdit()" style="width:50px; background:#333; color:white; border:none; padding:5px;">
+                <button onclick="addTable()" style="padding:8px 15px; background:#333; color:white; border:none; border-radius:5px; cursor:pointer;">+ DODAJ STOLIK</button>
+                <button onclick="saveLayout()" style="background:var(--gold); color:black; font-weight:bold; padding:8px 15px; border:none; border-radius:5px; cursor:pointer;">💾 ZAPISZ MAPĘ</button>
+            </div>
+            <div style="padding: 20px; overflow: auto; flex: 1; display: flex; flex-direction: column;">
+                <div id="floor-edit" class="floor-plan"></div>
+            </div>
+        </div>
+
+        <div id="tab-menu" class="tab">
+            <div style="background:#111; padding:20px; border-bottom:1px solid #222;">
+                <h3 style="margin-top:0; color:var(--gold);">Dodaj / Edytuj Produkt</h3>
+                <div class="input-group"><input type="text" id="m-key" placeholder="Klucz"><input type="text" id="m-name" placeholder="Nazwa"><input type="number" id="m-price" placeholder="Cena"></div>
+                <div class="input-group"><input type="text" id="m-desc" placeholder="Opis dania"></div>
+                <div class="input-group"><input type="text" id="m-allergens" placeholder="Alergeny"><input type="number" id="m-kcal" placeholder="Kcal"><input type="number" id="m-weight" placeholder="Waga (g)"><input type="number" id="m-sort" placeholder="Kolejność" value="10"></div>
+                <div class="input-group" style="align-items: center;">
+                    <label style="cursor: pointer; display: flex; align-items: center; gap: 10px;"><input type="checkbox" id="m-kitchen" checked style="width: 20px; height: 20px;"> Wysyłaj na KDS (Kuchnia)</label>
+                </div>
+                <div style="margin-top: 15px; display: flex; gap: 10px;">
+                    <input type="file" id="m-file" style="color:white;">
+                    <button onclick="saveProd()" style="background:var(--gold); color:black; font-weight:bold; padding:8px 20px; border:none; border-radius:5px; cursor:pointer;">ZAPISZ</button>
+                    <button onclick="clearForm()" style="background:#444; color:white; padding:8px 20px; border:none; border-radius:5px; cursor:pointer;">WYCZYŚĆ</button>
+                </div>
+            </div>
+            <div id="prod-grid" class="prod-grid"></div>
+        </div>
+    </main>
+
+    <script>
+        let layout = { width:10, height:8, tables: [] }; let activeTables = []; let allOrders = []; let menuData = {};
+        const SCALE = 60; let chart;
+
+        function showTab(id) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(id).classList.add('active'); event.target.classList.add('active');
+            if(id === 'tab-menu') loadMenu(); if(id === 'tab-floor-edit') drawFloorEdit();
+        }
+
+        async function fetchData() {
+            const [layRes, actRes, ordRes] = await Promise.all([ fetch('/api/get_layout'), fetch('/api/active_tables'), fetch('/api/all_orders') ]);
+            layout = await layRes.json(); activeTables = (await actRes.json()).tables; allOrders = (await ordRes.json()).orders;
+            document.getElementById('f-w').value = layout.width; document.getElementById('f-h').value = layout.height;
+            drawFloorDash(); if(document.getElementById('tab-floor-edit').classList.contains('active')) drawFloorEdit();
+            calcStats();
+        }
+
+        function getTableColorClass(tNum) {
+            const tInfo = activeTables.find(a => a.table_number == tNum);
+            // Wyłapuje 100% pusty stolik po usunięciu sesji
+            if (!tInfo || !tInfo.session_id) return 't-free'; 
+            
+            const myOrders = allOrders.filter(o => o.table_number == tNum);
+            if (myOrders.length === 0) return 't-open'; 
+            
+            const allPaid = myOrders.every(o => o.paid === true);
+            if (allPaid) return 't-paid'; 
+            
+            const allClosed = myOrders.every(o => o.status === 'closed');
+            if (allClosed) return 't-issued'; 
+            
+            return 't-open'; 
+        }
+
+        function drawFloorDash() {
+            const f = document.getElementById('floor-dash');
+            f.style.width = (layout.width * SCALE) + 'px'; f.style.height = (layout.height * SCALE) + 'px'; f.innerHTML = '';
+            layout.tables.forEach((t) => {
+                const div = document.createElement('div'); div.className = `table-rect ${getTableColorClass(t.n)}`;
+                div.style.width = SCALE + 'px'; div.style.height = SCALE + 'px';
+                div.style.left = (t.x * SCALE) + 'px'; div.style.top = (t.y * SCALE) + 'px'; div.innerText = t.n;
+                const tInfo = activeTables.find(a => a.table_number == t.n);
+                if(tInfo) {
+                    if(tInfo.call_waiter) div.classList.add('call');
+                    if(tInfo.pay_request) div.classList.add('pay');
+                }
+                div.onclick = () => { renderAdminSidebar(t.n); }; f.appendChild(div);
+            });
+        }
+
+        function drawFloorEdit() {
+            const f = document.getElementById('floor-edit');
+            f.style.width = (document.getElementById('f-w').value * SCALE) + 'px'; f.style.height = (document.getElementById('f-h').value * SCALE) + 'px'; f.innerHTML = '';
+            layout.tables.forEach((t, i) => {
+                const div = document.createElement('div'); div.className = `table-rect ${getTableColorClass(t.n)}`;
+                div.style.width = SCALE + 'px'; div.style.height = SCALE + 'px';
+                div.style.left = (t.x * SCALE) + 'px'; div.style.top = (t.y * SCALE) + 'px'; div.innerText = t.n;
+                div.ondblclick = (e) => {
+                    e.stopPropagation(); let newVal = prompt(`Edytujesz stolik nr ${t.n}.\nWpisz nowy numer lub "USUN":`, t.n);
+                    if (newVal === "USUN") layout.tables.splice(i, 1);
+                    else if (newVal !== null && newVal.trim() !== "") layout.tables[i].n = parseInt(newVal);
+                    drawFloorEdit(); 
+                };
+                div.onmousedown = (e) => {
+                    const move = (ev) => {
+                        const rect = f.getBoundingClientRect();
+                        layout.tables[i].x = Math.max(0, (ev.clientX - rect.left - (SCALE/2)) / SCALE);
+                        layout.tables[i].y = Math.max(0, (ev.clientY - rect.top - (SCALE/2)) / SCALE);
+                        drawFloorEdit();
+                    };
+                    window.onmousemove = move; window.onmouseup = () => window.onmousemove = null;
+                };
+                f.appendChild(div);
+            });
+        }
+
+        function renderAdminSidebar(tNum) {
+            document.getElementById('admin-sb-title').innerText = `Rachunek: Stolik ${tNum}`;
+            const myOrders = allOrders.filter(o => o.table_number == tNum && o.status !== 'closed');
+            let html = '';
+            if(myOrders.length === 0) { html = `<p style="color:#aaa; text-align:center; padding: 20px;">Brak aktywnych zamówień.</p>`; } 
+            else {
+                let total = 0;
+                myOrders.forEach(o => {
+                    if (!o.paid) total += o.price;
+                    const paidBadge = o.paid ? `<span style="color:#03a9f4; font-size:0.8em; font-weight:bold;">(OPŁACONE)</span>` : '';
+                    html += `<div class="order-item-read" style="${o.paid ? 'opacity: 0.5; border-color:#03a9f4;' : ''}">
+                        <div style="display:flex; justify-content:space-between; font-size:1.1em;"><b>${o.burger_name} ${paidBadge}</b> <span style="color:var(--gold);">${o.price} zł</span></div>
+                        <div style="font-size:0.85em; color:#888; margin-top:5px;">Status: ${o.status_pl}</div>
+                        ${o.note ? `<div style="color:#ffcc80; font-size:0.9em; margin-top:5px;">⚠️ UWAGA: ${o.note}</div>` : ''}
+                    </div>`;
+                });
+                html += `<div style="padding: 20px; text-align: right; font-size: 1.3em;">Suma do zapłaty: <b style="color:var(--gold); font-size:1.5em;">${total.toFixed(2)} zł</b></div>`;
+            }
+            document.getElementById('admin-sb-orders').innerHTML = html;
+        }
+
+        function calcStats() {
+            const rev = allOrders.filter(o => o.status === 'closed').reduce((s,o) => s + (o.price||0), 0);
+            document.getElementById('st-rev').innerText = rev.toFixed(2) + " zł"; document.getElementById('st-qty').innerText = allOrders.length;
+            const pC = {}; allOrders.forEach(o => pC[o.burger_name] = (pC[o.burger_name]||0)+1);
+            if(chart) chart.destroy();
+            chart = new Chart(document.getElementById('mainChart'), { type: 'bar', data: { labels: Object.keys(pC), datasets: [{ label: 'Sprzedaż', data: Object.values(pC), backgroundColor: '#d4af37' }] }, options: { responsive: true, maintainAspectRatio: false, color: '#fff', plugins:{legend:{display:false}} }});
+        }
+
+        function addTable() { layout.tables.push({n: layout.tables.length + 1, x: 0, y: 0}); drawFloorEdit(); }
+        async function saveLayout() { await fetch('/api/admin/save_layout', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({width: document.getElementById('f-w').value, height: document.getElementById('f-h').value, tables: layout.tables})}); alert("Mapa zapisana!"); fetchData(); }
+
+        async function saveProd() {
+            const fd = new FormData(); fd.append("key", document.getElementById('m-key').value); fd.append("name", document.getElementById('m-name').value); fd.append("price", document.getElementById('m-price').value); fd.append("description", document.getElementById('m-desc').value); fd.append("allergens", document.getElementById('m-allergens').value); fd.append("kcal", document.getElementById('m-kcal').value); fd.append("weight", document.getElementById('m-weight').value); fd.append("sort_order", document.getElementById('m-sort').value); fd.append("to_kitchen", document.getElementById('m-kitchen').checked);
+            if(document.getElementById('m-file').files[0]) fd.append("file", document.getElementById('m-file').files[0]);
+            await fetch('/api/admin/save_product', { method:'POST', body:fd }); clearForm(); loadMenu(); alert("Zapisano produkt!");
+        }
+
+        function clearForm() { document.getElementById('m-key').value = ""; document.getElementById('m-name').value = ""; document.getElementById('m-price').value = ""; document.getElementById('m-desc').value = ""; document.getElementById('m-allergens').value = ""; document.getElementById('m-kcal').value = ""; document.getElementById('m-weight').value = ""; document.getElementById('m-sort').value = "10"; document.getElementById('m-kitchen').checked = true; document.getElementById('m-file').value = ""; }
+
+        function loadForEdit(key) {
+            const v = menuData[key]; if(!v) return;
+            document.getElementById('m-key').value = key; document.getElementById('m-name').value = v.name; document.getElementById('m-price').value = v.price; document.getElementById('m-desc').value = v.description || ""; document.getElementById('m-allergens').value = v.allergens || ""; document.getElementById('m-kcal').value = v.kcal || ""; document.getElementById('m-weight').value = v.weight || ""; document.getElementById('m-sort').value = v.sort_order || 10; document.getElementById('m-kitchen').checked = (v.to_kitchen !== false && v.to_kitchen !== "false");
+        }
+
+        async function loadMenu() {
+            const res = await fetch('/api/get_menu'); menuData = await res.json();
+            document.getElementById('prod-grid').innerHTML = Object.entries(menuData).map(([k,v]) => `<div class="prod-card"><img src="/static/images/${v.image}" onerror="this.src='https://via.placeholder.com/80'"><h4 style="margin:5px 0;">${v.name}</h4><p style="margin:0; color:var(--gold); font-weight:bold;">${v.price} zł</p><button onclick="loadForEdit('${k}')" style="background:#2196f3; color:white; border:none; padding:5px; border-radius:3px; width:100%; margin-top:10px; cursor:pointer;">EDYTUJ</button></div>`).join('');
+        }
+        setInterval(fetchData, 4000); fetchData(); loadMenu();
+    </script>
+</body>
+</html>

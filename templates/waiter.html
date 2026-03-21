@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Panel Kelnera</title>
+    <style>
+        :root { --gold: #d4af37; --bg: #050505; }
+        body { background: var(--bg); color: #fff; font-family: sans-serif; margin: 0; display: flex; height: 100vh; overflow: hidden;}
+        .floor-container { flex: 1; padding: 20px; overflow: auto; position: relative; display: flex; flex-direction: column;}
+        
+        .legend { display: flex; gap: 15px; margin-bottom: 20px; padding: 10px; background: #111; border-radius: 8px; border: 1px solid #333; flex-wrap: wrap; justify-content: center;}
+        .leg-item { display: flex; align-items: center; gap: 8px; font-weight: bold; font-size: 0.9em; color: #ccc;}
+        .leg-box { width: 20px; height: 20px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.2);}
+        
+        .floor-plan { background: #111; position: relative; border: 2px dashed #333; margin: 0 auto; flex: 1;}
+        
+        .table-rect { position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-weight: bold; font-size: 1.5em; cursor: pointer; border: 2px solid rgba(0,0,0,0.5); transition: 0.2s; color: #fff;}
+        .t-free { background: #388e3c; } 
+        .t-open { background: #fbc02d; color: #000; } 
+        .t-issued { background: #d32f2f; } 
+        .t-paid { background: #03a9f4; }
+        
+        .table-rect.call { animation: pulseCall 1s infinite alternate; border: 3px solid #fff;}
+        .table-rect.pay { animation: pulsePay 1s infinite alternate; border: 3px solid #fff;}
+        
+        @keyframes pulseCall { from { transform: scale(1); box-shadow: 0 0 10px #2196f3; } to { transform: scale(1.05); box-shadow: 0 0 20px #2196f3; } }
+        @keyframes pulsePay { from { transform: scale(1); box-shadow: 0 0 10px #9c27b0; } to { transform: scale(1.05); box-shadow: 0 0 20px #9c27b0; } }
+
+        .sidebar { width: 400px; background: #151515; border-left: 1px solid #333; display: flex; flex-direction: column; }
+        .sidebar-header { padding: 20px; background: #111; border-bottom: 1px solid #333; text-align: center; }
+        .order-list { flex: 1; overflow-y: auto; padding: 20px; }
+        .order-item { background: #222; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid var(--gold); }
+        .btn-act { padding: 8px 15px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; margin-right: 5px;}
+        .btn-red { background: #d32f2f; color: white; }
+        .btn-green { background: #388e3c; color: white; }
+        .btn-pay { background: #8e24aa; color: white; width: 100%; padding: 15px; font-size: 1.1em; border: none; cursor: pointer; font-weight: bold; border-radius: 8px; margin-bottom: 10px;}
+        .btn-close { background: #b71c1c; color: white; width: 100%; padding: 20px; font-size: 1.1em; border: none; cursor: pointer; font-weight: bold;}
+    </style>
+</head>
+<body>
+    <div class="floor-container">
+        <h2 style="color:var(--gold); margin-top:0; text-align: center;">SALA - PANEL KELNERA</h2>
+        
+        <div class="legend">
+            <div class="leg-item"><div class="leg-box t-free"></div> Wolny</div>
+            <div class="leg-item"><div class="leg-box t-open"></div> W Trakcie</div>
+            <div class="leg-item"><div class="leg-box t-issued"></div> Wydane (Nieopłacone)</div>
+            <div class="leg-item"><div class="leg-box t-paid"></div> Opłacone</div>
+            <div class="leg-item"><div class="leg-box" style="background:#000; border:2px solid #2196f3;"></div> Mruga: Wezwanie</div>
+        </div>
+
+        <div id="floor" class="floor-plan"></div>
+    </div>
+    
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2 id="sb-title" style="margin:0; color:var(--gold);">Wybierz stolik</h2>
+        </div>
+        <div id="sb-orders" class="order-list">
+            <p style="color:#666; text-align:center; margin-top:50px;">Kliknij stolik na mapie, aby zobaczyć szczegóły.</p>
+        </div>
+        <div id="sb-actions" style="display:none; padding: 10px; background: #111; border-top: 1px solid #333;">
+            <button class="btn-pay" onclick="markAsPaid()">💰 OZNACZ JAKO OPŁACONE</button>
+            <button class="btn-close" onclick="closeTable()">🧹 POSPRZĄTAJ (ZAKOŃCZ SESJĘ)</button>
+        </div>
+    </div>
+
+    <script>
+        let layout = { width: 10, height: 8, tables: [] };
+        let activeTables = []; let allOrders = []; let selectedTable = null;
+        const SCALE = 80; 
+
+        async function fetchData() {
+            const [layRes, actRes, ordRes] = await Promise.all([ fetch('/api/get_layout'), fetch('/api/active_tables'), fetch('/api/all_orders') ]);
+            layout = await layRes.json(); activeTables = (await actRes.json()).tables; allOrders = (await ordRes.json()).orders;
+            drawFloor(); if(selectedTable) renderSidebar(selectedTable);
+        }
+
+        function getTableColorClass(tNum) {
+            const tInfo = activeTables.find(a => a.table_number == tNum);
+            // Jeśli nie ma go w aktywnych LUB nie ma sesji -> 100% ZIELONY
+            if (!tInfo || !tInfo.session_id) return 't-free'; 
+            
+            const myOrders = allOrders.filter(o => o.table_number == tNum);
+            if (myOrders.length === 0) return 't-open'; 
+            
+            const allPaid = myOrders.every(o => o.paid === true);
+            if (allPaid) return 't-paid'; 
+            
+            const allClosed = myOrders.every(o => o.status === 'closed');
+            if (allClosed) return 't-issued'; 
+            
+            return 't-open'; 
+        }
+
+        function drawFloor() {
+            const f = document.getElementById('floor');
+            f.style.width = (layout.width * SCALE) + 'px'; f.style.height = (layout.height * SCALE) + 'px';
+            f.innerHTML = '';
+            layout.tables.forEach(t => {
+                const div = document.createElement('div'); 
+                div.className = `table-rect ${getTableColorClass(t.n)}`;
+                div.style.width = SCALE + 'px'; div.style.height = SCALE + 'px';
+                div.style.left = (t.x * SCALE) + 'px'; div.style.top = (t.y * SCALE) + 'px'; 
+                div.innerText = t.n;
+                
+                const tInfo = activeTables.find(a => a.table_number == t.n);
+                if(tInfo) {
+                    if(tInfo.call_waiter) div.classList.add('call');
+                    if(tInfo.pay_request) div.classList.add('pay');
+                }
+                
+                div.onclick = () => {
+                    selectedTable = t.n;
+                    if(tInfo && (tInfo.call_waiter || tInfo.pay_request)) fetch(`/api/reset_call/${t.n}`, {method:'POST'});
+                    renderSidebar(t.n);
+                };
+                f.appendChild(div);
+            });
+        }
+
+        function renderSidebar(tNum) {
+            document.getElementById('sb-title').innerText = `STOLIK NR ${tNum}`;
+            document.getElementById('sb-actions').style.display = 'block';
+            const myOrders = allOrders.filter(o => o.table_number == tNum && o.status !== 'closed');
+            let html = '';
+            
+            if(myOrders.length === 0) { 
+                html = `<p style="color:#aaa; text-align:center;">Brak aktywnych zamówień.<br><br>Rachunek opłacony lub pusty.</p>`; 
+            } else {
+                let total = 0;
+                myOrders.forEach(o => {
+                    if (!o.paid) total += o.price;
+                    const paidBadge = o.paid ? `<span style="color:#03a9f4; font-size:0.8em; font-weight:bold;">(OPŁACONE)</span>` : '';
+                    const isKitchen = o.to_kitchen !== false && o.to_kitchen !== "false";
+                    
+                    html += `<div class="order-item" style="${o.paid ? 'border-color:#03a9f4; opacity:0.7;' : ''}">
+                        <div style="font-size:1.1em; font-weight:bold;">${o.burger_name} ${paidBadge}</div>
+                        <div style="color:var(--gold); margin-top:4px;">${o.price} zł | Status: ${o.status_pl}</div>
+                        ${o.note ? `<div style="color:#ffcc80; font-size:0.9em; margin-top:5px;">⚠️ UWAGA: ${o.note}</div>` : ''}
+                        <div style="margin-top:10px; display:flex; gap:5px;">`;
+                    
+                    // USUŃ: nie opłacone ORAZ (status: nowe LUB napój) ORAZ nie wydane
+                    if(!o.paid && (o.status === 'nowe' || !isKitchen) && o.status !== 'closed') {
+                        html += `<button class="btn-act btn-red" onclick="deleteOrder('${o.id}')">USUŃ</button>`;
+                    }
+                    
+                    // WYDAJ: (Gotowe z kuchni LUB Napój) ORAZ nie wydane jeszcze do stolika
+                    if(o.status !== 'closed' && (o.status === 'ready' || !isKitchen)) {
+                        html += `<button class="btn-act btn-green" onclick="issueItem('${o.id}')">WYDAJ ZANIEŚ</button>`;
+                    }
+
+                    html += `</div></div>`;
+                });
+                html += `<div style="text-align:center; font-size:1.3em; margin-top:15px; border-top:1px solid #444; padding-top:15px;">Pozostało do zapłaty: <b style="color:var(--gold); font-size:1.5em;">${total.toFixed(2)} zł</b></div>`;
+            }
+            document.getElementById('sb-orders').innerHTML = html;
+        }
+
+        async function markAsPaid() {
+            if(confirm(`Oznaczyć rachunek na stoliku ${selectedTable} jako OPŁACONY?`)) {
+                await fetch(`/api/mark_paid/${selectedTable}`, {method:'POST'}); fetchData();
+            }
+        }
+        async function deleteOrder(id) { if(confirm("Usunąć tę pozycję z rachunku?")) { await fetch(`/api/orders/${id}`, { method: 'DELETE' }); fetchData(); } }
+        async function issueItem(id) { await fetch(`/api/update_status/${id}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 'closed'}) }); fetchData(); }
+        async function closeTable() {
+            if(confirm(`Posprzątać Stolik ${selectedTable}? (Zakończy sesję)`)) {
+                await fetch(`/api/clear_table/${selectedTable}`, {method:'POST'});
+                const myOrders = allOrders.filter(o => o.table_number == selectedTable && o.status !== 'closed');
+                for (let o of myOrders) await fetch(`/api/update_status/${o.id}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({status: 'closed'}) });
+                selectedTable = null; document.getElementById('sb-title').innerText = `Wybierz stolik`;
+                document.getElementById('sb-orders').innerHTML = `<p style="color:#666; text-align:center; margin-top:50px;">Stolik posprzątany. Gotowy na nowych gości!</p>`;
+                document.getElementById('sb-actions').style.display = 'none'; fetchData();
+            }
+        }
+        setInterval(fetchData, 3000); fetchData();
+    </script>
+</body>
+</html>
