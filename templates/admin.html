@@ -297,14 +297,24 @@
         }
 
         function editItem(key) {
-            const v = menuData[key];
-            document.getElementById('m-key').value = key;
-            document.getElementById('m-name').value = v.name;
-            document.getElementById('m-price').value = v.price;
-            document.getElementById('m-sort').value = v.sort_order || 10;
-            document.getElementById('m-kitchen').value = String(v.to_kitchen);
-        }
+    const v = menuData[key];
+    if(!v) return;
 
+    // Wypełnianie pól formularza
+    document.getElementById('m-key').value = key;
+    document.getElementById('m-name').value = v.name;
+    document.getElementById('m-price').value = v.price;
+    document.getElementById('m-sort').value = v.sort_order || 10;
+    document.getElementById('m-desc').value = v.description || "";
+    document.getElementById('m-allergens').value = v.allergens || "";
+
+    // POPRAWKA KDS: Obsługuje format Boolean (True/False) i String ("true"/"false")
+    const isKds = (v.to_kitchen === true || String(v.to_kitchen).toLowerCase() === "true");
+    document.getElementById('m-kitchen').value = isKds ? "true" : "false";
+
+    // Przewinięcie do formularza, żeby Elvis widział co edytuje
+    document.querySelector('.form-container').scrollIntoView({ behavior: 'smooth' });
+}
         setInterval(fetchData, 4000);
         fetchData();
     </script>
