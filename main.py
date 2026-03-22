@@ -33,7 +33,7 @@ async def get_story(item: str = "burger"):
     try:
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": 100, "temperature": 0.8}
+            "generationConfig": {"maxOutputTokens": 400, "temperature": 0.8}
         }
         res = requests.post(GEMINI_URL, json=payload, timeout=5).json()
         story = res['candidates'][0]['content']['parts'][0]['text'].strip()
@@ -98,17 +98,7 @@ async def clear_table(table_id: str):
     db.collection("active_tables").document(table_id).delete()
     return {"ok": True}
 
-@app.post("/api/orders")
-async def create_order(payload: dict):
-    db.collection("orders").add({
-        "table_number": int(payload['table_number']), "burger_name": payload.get('burger_name'),
-        "price": payload.get('price', 0), "note": payload.get('note', ''),
-        "to_kitchen": payload.get('to_kitchen', True), 
-        "status": "nowe" if payload.get('to_kitchen', True) else "ready",
-        "time_ordered": firestore.SERVER_TIMESTAMP
-    })
-    db.collection("active_tables").document(str(payload['table_number'])).set({"call_waiter": False}, merge=True)
-    return {"ok": True}
+
 
 @app.post("/api/update_status/{id}")
 async def update_status(id: str, payload: dict):
@@ -120,16 +110,50 @@ async def delete_order(id: str):
     db.collection("orders").document(id).delete()
     return {"ok": True}
 
+# Zmień mapowanie statusów (dodaj status 'nowe' do mapy!)
+STATUS_MAP = {
+    "nowe": "W kolejce", 
+    "preparing": "W kuchni", 
+    "ready": "Gotowe!", 
+    "closed": "Wydane"
+}
+
+@app.post("/api/orders")
+async def add_order(order: dict):
+    table_num = str(order.get("table_number"))
+    # Pobieramy sesję bezpośrednio z frontendu (bo klient ją ma w ciastku/zmiennej)
+    current_session = order.get("session_id")
+    
+    # Jeśli frontend nie wysłał sesji, próbujemy pobrać z bazy
+    if not current_session:
+        table_ref = db.collection("active_tables").document(table_num).get()
+        current_session = table_ref.to_dict().get("session_id") if table_ref.exists else "unknown"
+
+    order_data = {
+        "table_number": table_num,
+        "burger_name": order.get("burger_name"),
+        "price": float(order.get("price")),
+        "status": "nowe",
+        "paid": False,
+        "session_id": current_session,
+        "timestamp": firestore.SERVER_TIMESTAMP # Używamy timestamp do sortowania!
+    }
+    db.collection("orders").add(order_data)
+    return {"ok": True}
+
 @app.get("/api/all_orders")
 async def all_orders():
-    docs = db.collection("orders").order_by("time_ordered", direction=firestore.Query.DESCENDING).limit(150).stream()
+    docs = db.collection("orders").order_by("timestamp", direction=firestore.Query.DESCENDING).limit(100).stream()
     orders = []
     for d in docs:
         data = d.to_dict()
-        if data.get("time_ordered"): data["time_ordered"] = data["time_ordered"].isoformat()
         data["id"] = d.id
-        data["status_pl"] = STATUS_MAP.get(data.get("status"))
-        data["paid"] = data.get("paid", False) # <--- DODAJ TĘ LINIJKĘ
+        # Pobierz to_kitchen z menu, jeśli nie ma go w zamówieniu
+        if "to_kitchen" not in data:
+            menu_ref = db.collection("menu").document(data.get("burger_name", "")).get()
+            data["to_kitchen"] = menu_ref.to_dict().get("to_kitchen", True) if menu_ref.exists else True
+        
+        data["status_pl"] = STATUS_MAP.get(data.get("status"), "Oczekujące")
         orders.append(data)
     return {"orders": orders}
 
@@ -158,15 +182,35 @@ async def index_page(request: Request, table: Optional[str] = None, burger_sessi
     return resp
 @app.post("/api/mark_paid/{table_num}")
 async def mark_paid(table_num: int):
-    # Pobieramy wszystkie zamówienia dla tego stolika
-    docs = db.collection("orders").where("table_number", "==", table_num).stream()
-    for d in docs:
-        # Zaznaczamy je jako opłacone
-        db.collection("orders").document(d.id).update({"paid": True})
+    table_str = str(table_num)
     
-    # Wyłączamy wezwanie "zapłać" na stoliku
-    db.collection("active_tables").document(str(table_num)).set({"pay_request": False}, merge=True)
+    # 1. Pobieramy ID aktualnej sesji tego stolika
+    table_ref = db.collection("active_tables").document(table_str).get()
+    if not table_ref.exists:
+        return {"error": "Brak aktywnej sesji"}
+    
+    current_session = table_ref.to_dict().get("session_id")
+
+    # 2. Szukamy zamówień TYLKO dla tego stolika I TYLKO z tej sesji, które NIE są opłacone
+    docs = db.collection("orders")\
+             .where("table_number", "==", table_str)\
+             .where("session_id", "==", current_session)\
+             .where("paid", "==", False).stream()
+    
+    batch = db.batch()
+    found = False
+    for d in docs:
+        batch.update(db.collection("orders").document(d.id), {"paid": True})
+        found = True
+    
+    if found:
+        batch.commit()
+    
+    # 3. Wyłączamy lampkę "ZAPŁAĆ" u kelnera
+    db.collection("active_tables").document(table_str).update({"pay_request": False})
+    
     return {"ok": True}
+
 @app.get("/kds")
 async def kds(request: Request): return templates.TemplateResponse("kds.html", {"request": request})
 @app.get("/waiter")
